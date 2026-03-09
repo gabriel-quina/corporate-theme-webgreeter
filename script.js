@@ -1,5 +1,5 @@
 const DEBUG_AUTH_LOG = false;
-const SUCCESS_REDIRECT_DELAY_MS = 2000;
+const SUCCESS_REDIRECT_DELAY_MS = 5000;
 
 const form = document.getElementById("login-form");
 const usernameInput = document.getElementById("username");
@@ -24,8 +24,21 @@ function normalize(text) {
 }
 
 function setMessage(text, isError = false) {
+  message.innerHTML = "";
   message.textContent = text || "";
   message.classList.toggle("error", isError);
+  message.classList.remove("loading");
+}
+
+function setLoadingMessage(username) {
+  const normalizedUsername = normalize(username);
+
+  message.classList.remove("error");
+  message.classList.add("loading");
+  message.innerHTML = `
+    <span class="spinner" aria-hidden="true"></span>
+    <span class="loading-text">Autenticação concluída. Entrando na sessão de <strong>${normalizedUsername}</strong>...</span>
+  `;
 }
 
 function appendDebugMessage(text, isError = false) {
@@ -104,6 +117,7 @@ function resetAuthenticationState() {
   submitButton.textContent = "Login";
   passwordChangePanel.classList.add("hidden");
   cancelButton.classList.add("hidden");
+  message.classList.remove("loading");
   updateStepVisual();
 }
 
@@ -225,8 +239,8 @@ function setupLightdmSignals() {
     appendDebugMessage(`authentication_complete: ${window.lightdm.is_authenticated ? "success" : "fail"}`);
 
     if (window.lightdm.is_authenticated) {
-      setMessage("Autenticação concluída. Entrando na sessão...");
       resetAuthenticationState();
+      setLoadingMessage(pendingUsername || usernameInput.value);
 
       window.setTimeout(() => {
         if (typeof window.lightdm.start_session_sync === "function") {
