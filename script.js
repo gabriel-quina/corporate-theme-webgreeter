@@ -3,76 +3,77 @@ const usernameInput = document.getElementById("username");
 const passwordInput = document.getElementById("password");
 const message = document.getElementById("message");
 
-const hasGreeterApi = typeof window.lightdm !== "undefined";
-let waitingForPassword = false;
+let pendingUsername = "";
+let pendingPassword = "";
 
 function setMessage(text, isError = false) {
   message.textContent = text;
   message.classList.toggle("error", isError);
 }
 
-function resetPasswordField() {
+function resetFormAfterFail() {
   passwordInput.value = "";
   passwordInput.focus();
+  window.lightdm?.cancel_authentication();
 }
 
-if (!hasGreeterApi) {
-  setMessage("API do WebGreeter não encontrada. Execute este tema no WebGreeter.", true);
-}
-
-window.show_prompt = (text, type) => {
-  if (type === "password") {
-    waitingForPassword = true;
-    setMessage(text || "Digite sua senha para continuar.");
-    passwordInput.focus();
-    return;
-  }
-
-  setMessage(text || "Informe suas credenciais.");
-};
-
-window.show_message = (text, type) => {
-  setMessage(text || "", type === "error");
-};
-
-window.authentication_complete = () => {
-  if (!hasGreeterApi) return;
-
-  if (window.lightdm.is_authenticated) {
-    setMessage("Login efetuado com sucesso.");
-    window.lightdm.start_session_sync();
-  } else {
-    waitingForPassword = false;
-    setMessage("Usuário ou senha inválidos.", true);
-    resetPasswordField();
-  }
-};
-
-form.addEventListener("submit", (event) => {
-  event.preventDefault();
-
-  if (!hasGreeterApi) return;
-
-  const username = usernameInput.value.trim();
-  const password = passwordInput.value;
-
-  if (!username || !password) {
-    setMessage("Preencha usuário e senha.", true);
-    return;
-  }
-
-  try {
-    if (!waitingForPassword) {
-      window.lightdm.cancel_authentication();
-      window.lightdm.authenticate(username);
-      waitingForPassword = true;
+function setupLightdmSignals() {
+  window.lightdm.show_prompt.connect((_prompt, type) => {
+    // 0 = username, 1 = password
+    if (type === 0) {
+      window.lightdm.respond(pendingUsername);
+      return;
     }
 
-    window.lightdm.respond(password);
-    setMessage("Autenticando...");
-  } catch (error) {
-    waitingForPassword = false;
-    setMessage(`Erro ao autenticar: ${error.message}`, true);
-  }
-});
+    if (type === 1) {
+      window.lightdm.respond(pendingPassword);
+      setMessage("Autenticando...");
+    }
+  });
 
+  window.lightdm.show_message.connect((text, type) => {
+    setMessage(text || "", type === "error");
+  });
+
+  window.lightdm.authentication_complete.connect(() => {
+    if (window.lightdm.is_authenticated) {
+      setMessage("Login efetuado com sucesso.");
+      if (typeof window.lightdm.start_session_sync === "function") {
+        window.lightdm.start_session_sync();
+      } else {
+        window.lightdm.start_session(window.lightdm.default_session ?? null);
+      }
+      return;
+    }
+
+    setMessage("Usuário ou senha inválidos.", true);
+    resetFormAfterFail();
+  });
+}
+
+function init() {
+  if (!window.lightdm) {
+    setMessage("API do WebGreeter não encontrada.", true);
+    return;
+  }
+
+  setupLightdmSignals();
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+
+    pendingUsername = usernameInput.value.trim();
+    pendingPassword = passwordInput.value;
+
+    if (!pendingUsername || !pendingPassword) {
+      setMessage("Preencha usuário e senha.", true);
+      return;
+    }
+
+    setMessage("Iniciando autenticação...");
+    window.lightdm.cancel_authentication();
+    window.lightdm.authenticate(null);
+  });
+}
+
+init();
