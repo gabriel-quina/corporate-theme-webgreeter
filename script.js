@@ -6,9 +6,21 @@ const message = document.getElementById("message");
 let pendingUsername = "";
 let pendingPassword = "";
 
-function setMessage(text, isError = false) {
-  message.textContent = text;
-  message.classList.toggle("error", isError);
+function appendMessage(text, isError = false) {
+  if (!text) {
+    return;
+  }
+
+  const line = document.createElement("p");
+  line.className = "message-line";
+
+  if (isError) {
+    line.classList.add("error");
+  }
+
+  line.textContent = text;
+  message.append(line);
+  message.scrollTop = message.scrollHeight;
 }
 
 function resetFormAfterFail() {
@@ -27,17 +39,17 @@ function setupLightdmSignals() {
 
     if (type === 1) {
       window.lightdm.respond(pendingPassword);
-      setMessage("Autenticando...");
+      appendMessage("Autenticando...");
     }
   });
 
   window.lightdm.show_message.connect((text, type) => {
-    setMessage(text || "", type === "error");
+    appendMessage(text || "", type === "error");
   });
 
   window.lightdm.authentication_complete.connect(() => {
     if (window.lightdm.is_authenticated) {
-      setMessage("Login efetuado com sucesso.");
+      appendMessage("Login efetuado com sucesso.");
       if (typeof window.lightdm.start_session_sync === "function") {
         window.lightdm.start_session_sync();
       } else {
@@ -46,14 +58,14 @@ function setupLightdmSignals() {
       return;
     }
 
-    setMessage("Usuário ou senha inválidos.", true);
+    appendMessage("Usuário ou senha inválidos.", true);
     resetFormAfterFail();
   });
 }
 
 function init() {
   if (!window.lightdm) {
-    setMessage("API do WebGreeter não encontrada.", true);
+    appendMessage("API do WebGreeter não encontrada.", true);
     return;
   }
 
@@ -66,11 +78,11 @@ function init() {
     pendingPassword = passwordInput.value;
 
     if (!pendingUsername || !pendingPassword) {
-      setMessage("Preencha usuário e senha.", true);
+      appendMessage("Preencha usuário e senha.", true);
       return;
     }
 
-    setMessage("Iniciando autenticação...");
+    appendMessage("Iniciando autenticação...");
     window.lightdm.cancel_authentication();
     window.lightdm.authenticate(null);
   });
