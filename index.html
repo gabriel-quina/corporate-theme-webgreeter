@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Corporate WebGreeter</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="login-card" aria-label="Login">
+      <h1>Entrar</h1>
+      <p class="subtitle">Acesse com sua conta corporativa.</p>
+
+      <form id="login-form" autocomplete="off">
+        <label for="username">Usuário</label>
+        <input id="username" name="username" type="text" required autofocus />
+
+        <label for="password">Senha</label>
+        <input id="password" name="password" type="password" required />
+
+        <button type="submit">Login</button>
+      </form>
+
+      <p id="message" role="status" aria-live="polite"></p>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
+
