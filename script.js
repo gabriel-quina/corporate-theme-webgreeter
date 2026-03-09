@@ -1,16 +1,35 @@
+const DEBUG_AUTH_LOG = false;
+const SUCCESS_REDIRECT_DELAY_MS = 2000;
+
 const form = document.getElementById("login-form");
 const usernameInput = document.getElementById("username");
 const passwordInput = document.getElementById("password");
-const submitButton = form.querySelector('button[type="submit"]');
+const passwordLabel = document.getElementById("password-label");
+const submitButton = document.getElementById("submit-button");
+const cancelButton = document.getElementById("cancel-button");
 const message = document.getElementById("message");
+const debugLog = document.getElementById("debug-log");
+const passwordChangePanel = document.getElementById("password-change-panel");
 
 let pendingUsername = "";
 let pendingPassword = "";
 let pendingPasswordPrompt = null;
 let isPasswordChangeFlow = false;
+let currentPasswordStep = null;
 
-function appendMessage(text, isError = false) {
-  if (!text) {
+function normalize(text) {
+  return String(text || "")
+    .toLowerCase()
+    .trim();
+}
+
+function setMessage(text, isError = false) {
+  message.textContent = text || "";
+  message.classList.toggle("error", isError);
+}
+
+function appendDebugMessage(text, isError = false) {
+  if (!DEBUG_AUTH_LOG || !text) {
     return;
   }
 
@@ -22,22 +41,70 @@ function appendMessage(text, isError = false) {
   }
 
   line.textContent = text;
-  message.append(line);
-  message.scrollTop = message.scrollHeight;
+  debugLog.append(line);
+  debugLog.scrollTop = debugLog.scrollHeight;
 }
 
-function setSubmitButtonIdleMode() {
-  submitButton.textContent = "Login";
+function getPromptStep(prompt) {
+  const normalizedPrompt = normalize(prompt);
+
+  if (normalizedPrompt.includes("current password") || normalizedPrompt.includes("senha atual")) {
+    return "current";
+  }
+
+  if (normalizedPrompt.includes("retype") || normalizedPrompt.includes("repita")) {
+    return "retype";
+  }
+
+  if (normalizedPrompt.includes("new password") || normalizedPrompt.includes("nova senha")) {
+    return "new";
+  }
+
+  return null;
 }
 
-function setSubmitButtonPromptMode() {
+function updateStepVisual() {
+  const steps = document.querySelectorAll("#password-change-steps li");
+  const order = ["current", "new", "retype"];
+
+  steps.forEach((stepNode) => {
+    const step = stepNode.dataset.step;
+    stepNode.classList.remove("active", "done");
+
+    if (!currentPasswordStep) {
+      return;
+    }
+
+    const currentIndex = order.indexOf(currentPasswordStep);
+    const stepIndex = order.indexOf(step);
+
+    if (stepIndex < currentIndex) {
+      stepNode.classList.add("done");
+    } else if (stepIndex === currentIndex) {
+      stepNode.classList.add("active");
+    }
+  });
+}
+
+function enterPasswordChangeFlow() {
+  isPasswordChangeFlow = true;
+  usernameInput.disabled = true;
+  passwordChangePanel.classList.remove("hidden");
+  cancelButton.classList.remove("hidden");
   submitButton.textContent = "Enviar";
 }
 
 function resetAuthenticationState() {
   pendingPasswordPrompt = null;
   isPasswordChangeFlow = false;
-  setSubmitButtonIdleMode();
+  currentPasswordStep = null;
+
+  usernameInput.disabled = false;
+  passwordLabel.textContent = "Senha";
+  submitButton.textContent = "Login";
+  passwordChangePanel.classList.add("hidden");
+  cancelButton.classList.add("hidden");
+  updateStepVisual();
 }
 
 function resetFormAfterFail() {
@@ -47,40 +114,64 @@ function resetFormAfterFail() {
   window.lightdm?.cancel_authentication();
 }
 
-function normalize(text) {
-  return String(text || "")
-    .toLowerCase()
-    .trim();
-}
+function setInstructionForStep(step) {
+  if (step === "current") {
+    passwordLabel.textContent = "Senha atual";
+    setMessage("Passo 1 de 3: digite sua senha ATUAL e clique em Enviar.");
+    return;
+  }
 
-function isPasswordChangePrompt(prompt) {
-  const normalizedPrompt = normalize(prompt);
+  if (step === "new") {
+    passwordLabel.textContent = "Nova senha";
+    setMessage("Passo 2 de 3: digite uma NOVA senha e clique em Enviar.");
+    return;
+  }
 
-  return (
-    normalizedPrompt.includes("current password") ||
-    normalizedPrompt.includes("new password") ||
-    normalizedPrompt.includes("retype") ||
-    normalizedPrompt.includes("nova senha") ||
-    normalizedPrompt.includes("senha atual") ||
-    normalizedPrompt.includes("repita")
-  );
+  if (step === "retype") {
+    passwordLabel.textContent = "Confirmar nova senha";
+    setMessage("Passo 3 de 3: redigite a NOVA senha para confirmar.");
+    return;
+  }
+
+  passwordLabel.textContent = "Senha";
+  setMessage("Digite a senha solicitada e clique em Enviar.");
 }
 
 function mapPamMessage(text, type) {
   const normalizedText = normalize(text);
 
   if (normalizedText.includes("password expired")) {
-    isPasswordChangeFlow = true;
+    enterPasswordChangeFlow();
     return {
-      text: "Sua senha expirou. Informe a senha solicitada para definir uma nova.",
+      text: "Sua senha expirou e precisa ser alterada agora.",
       isError: true,
     };
   }
 
   if (normalizedText.includes("bad password")) {
-    isPasswordChangeFlow = true;
     return {
-      text: "A nova senha foi recusada pela política de segurança. Escolha outra senha.",
+      text: "A nova senha não atende os requisitos mínimos. Tente outra senha.",
+      isError: true,
+    };
+  }
+
+  if (normalizedText.includes("passwords do not match")) {
+    return {
+      text: "As senhas não coincidem. Redigite a nova senha corretamente.",
+      isError: true,
+    };
+  }
+
+  if (normalizedText.includes("old password not accepted")) {
+    return {
+      text: "A senha atual informada está incorreta. Tente novamente.",
+      isError: true,
+    };
+  }
+
+  if (normalizedText.includes("password change failed")) {
+    return {
+      text: "Não foi possível concluir a troca de senha. Revise os dados e tente novamente.",
       isError: true,
     };
   }
@@ -93,50 +184,64 @@ function mapPamMessage(text, type) {
 
 function setupLightdmSignals() {
   window.lightdm.show_prompt.connect((prompt, type) => {
-    // 0 = username, 1 = password
+    appendDebugMessage(`show_prompt [${type}]: ${prompt}`);
+
     if (type === 0) {
       window.lightdm.respond(pendingUsername);
       return;
     }
 
-    if (type === 1) {
-      if (isPasswordChangePrompt(prompt)) {
-        isPasswordChangeFlow = true;
-        pendingPasswordPrompt = prompt;
-        setSubmitButtonPromptMode();
-        appendMessage(`PAM solicitou: ${prompt}`);
-        appendMessage("Digite a senha solicitada e clique em Enviar.");
-        passwordInput.value = "";
-        passwordInput.focus();
-        return;
-      }
-
-      window.lightdm.respond(pendingPassword);
-      appendMessage("Autenticando...");
+    if (type !== 1) {
+      return;
     }
+
+    const step = getPromptStep(prompt);
+
+    if (step) {
+      enterPasswordChangeFlow();
+      pendingPasswordPrompt = prompt;
+      currentPasswordStep = step;
+      updateStepVisual();
+      setInstructionForStep(step);
+      passwordInput.value = "";
+      passwordInput.focus();
+      return;
+    }
+
+    window.lightdm.respond(pendingPassword);
+    setMessage("Autenticando...");
   });
 
   window.lightdm.show_message.connect((text, type) => {
     const mapped = mapPamMessage(text, type);
-    appendMessage(mapped.text, mapped.isError);
+    appendDebugMessage(`show_message [${type}]: ${text}`, mapped.isError);
+
+    if (mapped.text) {
+      setMessage(mapped.text, mapped.isError);
+    }
   });
 
   window.lightdm.authentication_complete.connect(() => {
+    appendDebugMessage(`authentication_complete: ${window.lightdm.is_authenticated ? "success" : "fail"}`);
+
     if (window.lightdm.is_authenticated) {
-      appendMessage("Login efetuado com sucesso.");
+      setMessage("Autenticação concluída. Entrando na sessão...");
       resetAuthenticationState();
-      if (typeof window.lightdm.start_session_sync === "function") {
-        window.lightdm.start_session_sync();
-      } else {
-        window.lightdm.start_session(window.lightdm.default_session ?? null);
-      }
+
+      window.setTimeout(() => {
+        if (typeof window.lightdm.start_session_sync === "function") {
+          window.lightdm.start_session_sync();
+        } else {
+          window.lightdm.start_session(window.lightdm.default_session ?? null);
+        }
+      }, SUCCESS_REDIRECT_DELAY_MS);
       return;
     }
 
     if (isPasswordChangeFlow) {
-      appendMessage("Falha na troca de senha ou autenticação. Revise as mensagens do PAM acima.", true);
+      setMessage("Falha na troca de senha. Revise as informações e tente novamente.", true);
     } else {
-      appendMessage("Usuário ou senha inválidos.", true);
+      setMessage("Usuário ou senha inválidos.", true);
     }
 
     resetFormAfterFail();
@@ -145,11 +250,23 @@ function setupLightdmSignals() {
 
 function init() {
   if (!window.lightdm) {
-    appendMessage("API do WebGreeter não encontrada.", true);
+    setMessage("API do WebGreeter não encontrada.", true);
     return;
   }
 
+  if (DEBUG_AUTH_LOG) {
+    debugLog.classList.remove("hidden");
+    appendDebugMessage("DEBUG_AUTH_LOG ativo");
+  }
+
   setupLightdmSignals();
+
+  cancelButton.addEventListener("click", () => {
+    appendDebugMessage("Fluxo de troca cancelado pelo usuário");
+    setMessage("Troca de senha cancelada. Inicie o login novamente.", true);
+    window.lightdm.cancel_authentication();
+    resetFormAfterFail();
+  });
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -158,15 +275,15 @@ function init() {
       const promptResponse = passwordInput.value;
 
       if (!promptResponse) {
-        appendMessage("Informe a senha solicitada pelo PAM antes de enviar.", true);
+        setMessage("Preencha o campo de senha para continuar o passo atual.", true);
         return;
       }
 
-      appendMessage(`Respondendo solicitação do PAM: ${pendingPasswordPrompt}`);
+      appendDebugMessage(`respond prompt: ${pendingPasswordPrompt}`);
       window.lightdm.respond(promptResponse);
       passwordInput.value = "";
       pendingPasswordPrompt = null;
-      setSubmitButtonIdleMode();
+      setMessage("Resposta enviada. Aguarde a próxima etapa...");
       return;
     }
 
@@ -174,11 +291,11 @@ function init() {
     pendingPassword = passwordInput.value;
 
     if (!pendingUsername || !pendingPassword) {
-      appendMessage("Preencha usuário e senha.", true);
+      setMessage("Preencha usuário e senha.", true);
       return;
     }
 
-    appendMessage("Iniciando autenticação...");
+    setMessage("Autenticando...");
     window.lightdm.cancel_authentication();
     window.lightdm.authenticate(null);
   });

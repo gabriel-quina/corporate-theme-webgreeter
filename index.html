@@ -15,13 +15,26 @@
         <label for="username">Usuário</label>
         <input id="username" name="username" type="text" required autofocus />
 
-        <label for="password">Senha</label>
+        <label for="password" id="password-label">Senha</label>
         <input id="password" name="password" type="password" required />
 
-        <button type="submit">Login</button>
+        <div class="actions-row">
+          <button type="submit" id="submit-button">Login</button>
+          <button type="button" id="cancel-button" class="secondary hidden">Cancelar</button>
+        </div>
       </form>
 
-      <div id="message" role="status" aria-live="polite" aria-atomic="false"></div>
+      <section id="password-change-panel" class="hidden" aria-live="polite">
+        <h2>Troca obrigatória de senha</h2>
+        <ol id="password-change-steps" class="steps">
+          <li data-step="current">1. Digite sua senha atual.</li>
+          <li data-step="new">2. Digite uma nova senha.</li>
+          <li data-step="retype">3. Redigite a nova senha.</li>
+        </ol>
+      </section>
+
+      <div id="message" role="status" aria-live="polite" aria-atomic="true"></div>
+      <div id="debug-log" class="hidden" aria-live="polite" aria-atomic="false"></div>
     </main>
 
     <script src="script.js"></script>
